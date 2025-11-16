@@ -29,10 +29,25 @@ pub fn Queue(comptime T: type, capacity: usize) type {
             while (self.size == 0) {
                 self.cond.wait(&self.mutex);
             }
+            const item = self.remove();
+            self.mutex.unlock();
+            return item;
+        }
+
+        pub fn removeOrNull(self: *Self) ?T {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            if (self.size == 0) {
+                return null;
+            } else {
+                return self.remove();
+            }
+        }
+
+        fn remove(self: *Self) T {
             self.size -= 1;
             const item = self.items[self.tail];
             self.tail = (self.tail + 1) % self.items.len;
-            self.mutex.unlock();
             return item;
         }
     };

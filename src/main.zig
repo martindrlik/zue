@@ -18,19 +18,33 @@ pub fn main() !void {
     }
 
     var router = try server.router(.{});
-    router.put("/q/:queue_name/:content", putMessage, .{});
-    router.get("/q/:queue_name", getMessage, .{});
+    router.put("/create/queue/:queue_name", createQueue, .{});
+    router.put("/queue/:queue_name/:content", putMessage, .{});
+    router.get("/queue/:queue_name", getMessage, .{});
+    router.delete("/delete/queue/:queue_name", deleteQueue, .{});
 
     try server.listen();
 }
 
+fn createQueue(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
+    const queue_name = req.params.get("queue_name") orelse return error.MissingQueueName;
+    try app.createQueue(queue_name);
+}
+
 fn putMessage(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
-    const queue_name = req.params.get("queue_name") orelse "default";
-    const content = req.params.get("content") orelse "";
+    const queue_name = req.params.get("queue_name") orelse return error.MissingQueueName;
+    const content = req.params.get("content") orelse return error.MissingContent;
+    if (!app.containsQueue(queue_name)) return error.QueueNotFound;
     try app.add(queue_name, content);
 }
 
 fn getMessage(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const queue_name = req.params.get("queue_name") orelse "default";
+    const queue_name = req.params.get("queue_name") orelse return error.MissingQueueName;
+    if (!app.containsQueue(queue_name)) return error.QueueNotFound;
     res.body = try app.removeOrWait(res.arena, queue_name);
+}
+
+fn deleteQueue(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
+    const queue_name = req.params.get("queue_name") orelse return error.MissingQueueName;
+    try app.deleteQueue(queue_name);
 }

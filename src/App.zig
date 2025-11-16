@@ -15,6 +15,14 @@ pub fn init(allocator: std.mem.Allocator) Self {
     };
 }
 
+pub fn createQueue(self: *Self, queue_name: []const u8) !void {
+    try self.messages.createQueue(self.allocator, queue_name);
+}
+
+pub fn containsQueue(self: *Self, queue_name: []const u8) bool {
+    return self.messages.queues.contains(queue_name);
+}
+
 pub fn add(self: *Self, queue_name: []const u8, content: []const u8) !void {
     var message = try self.allocator.create(Message);
     std.mem.copyForwards(u8, &message.content, content);
@@ -28,4 +36,8 @@ pub fn removeOrWait(self: *Self, allocator: std.mem.Allocator, queue_name: []con
     var content = try allocator.alloc(u8, message.content_len);
     @memcpy(content[0..message.content_len], message.content[0..message.content_len]);
     return content;
+}
+
+pub fn deleteQueue(self: *Self, queue_name: []const u8) !void {
+    try self.messages.deleteQueue(self.allocator, queue_name);
 }
