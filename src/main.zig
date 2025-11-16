@@ -18,25 +18,19 @@ pub fn main() !void {
     }
 
     var router = try server.router(.{});
-    router.put("/message/:content", putMessage, .{});
-    router.get("/message", getMessage, .{});
+    router.put("/q/:queue_name/:content", putMessage, .{});
+    router.get("/q/:queue_name", getMessage, .{});
 
     try server.listen();
 }
 
 fn putMessage(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
-    if (req.params.get("content")) |content| {
-        var message = try app.allocator.create(Message);
-        std.mem.copyForwards(u8, &message.content, content);
-        message.content_len = content.len;
-        try app.messages.add(message);
-    }
+    const queue_name = req.params.get("queue_name") orelse "default";
+    const content = req.params.get("content") orelse "";
+    try app.add(queue_name, content);
 }
 
-fn getMessage(app: *App, _: *httpz.Request, res: *httpz.Response) !void {
-    const message = app.messages.pop();
-    defer app.allocator.destroy(message);
-    var body = try res.arena.alloc(u8, message.content_len);
-    @memcpy(body[0..message.content_len], message.content[0..message.content_len]);
-    res.body = body;
+fn getMessage(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const queue_name = req.params.get("queue_name") orelse "default";
+    res.body = try app.removeOrWait(res.arena, queue_name);
 }
