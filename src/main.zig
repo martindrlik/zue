@@ -20,7 +20,7 @@ pub fn main() !void {
 
     var router = try server.router(.{});
     router.put("/create/queue/:queue_name", createQueue, .{});
-    router.put("/queue/:queue_name/:content", putMessage, .{});
+    router.put("/queue/:queue_name", putMessage, .{});
     router.get("/queue/:queue_name", getMessage, .{});
     router.delete("/delete/queue/:queue_name", deleteQueue, .{});
 
@@ -34,7 +34,7 @@ fn createQueue(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
 
 fn putMessage(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
     const queue_name = req.params.get("queue_name") orelse return errors.Queue.MissingQueueName;
-    const content = req.params.get("content") orelse return error.MissingContent;
+    const content = req.body() orelse return error.MissingContent;
     if (!app.containsQueue(queue_name)) return errors.Queue.QueueNotFound;
     try app.add(queue_name, content);
 }
