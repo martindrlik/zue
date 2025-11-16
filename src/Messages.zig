@@ -26,7 +26,7 @@ pub fn createQueue(self: *Self, allocator: std.mem.Allocator, queue_name: []cons
 
 pub fn add(self: *Self, allocator: std.mem.Allocator, queue_name: []const u8, message: *Message) !void {
     self.mutex.lock();
-    defer self.mutex.unlock();
+    errdefer self.mutex.unlock();
     if (self.queues.contains(queue_name)) {
         var q = self.queues.get(queue_name) orelse unreachable;
         try q.add(message);
@@ -37,13 +37,15 @@ pub fn add(self: *Self, allocator: std.mem.Allocator, queue_name: []const u8, me
         try self.queues.put(allocator, k, q);
         try q.add(message);
     }
+    self.mutex.unlock();
     self.cond.signal();
 }
 
 pub fn removeOrWait(self: *Self, queue_name: []const u8) !*Message {
     self.mutex.lock();
-    defer self.mutex.unlock();
+    errdefer self.mutex.unlock();
     if (self.queues.get(queue_name)) |queue| {
+        self.mutex.unlock();
         return queue.removeOrWait();
     } else {
         return errors.Queue.QueueNotFound;
