@@ -3,6 +3,7 @@ const std = @import("std");
 const httpz = @import("httpz");
 
 const App = @import("App.zig");
+const errors = @import("errors.zig");
 const Message = @import("Message.zig");
 
 pub fn main() !void {
@@ -27,24 +28,24 @@ pub fn main() !void {
 }
 
 fn createQueue(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
-    const queue_name = req.params.get("queue_name") orelse return error.MissingQueueName;
+    const queue_name = req.params.get("queue_name") orelse return errors.Queue.MissingQueueName;
     try app.createQueue(queue_name);
 }
 
 fn putMessage(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
-    const queue_name = req.params.get("queue_name") orelse return error.MissingQueueName;
+    const queue_name = req.params.get("queue_name") orelse return errors.Queue.MissingQueueName;
     const content = req.params.get("content") orelse return error.MissingContent;
-    if (!app.containsQueue(queue_name)) return error.QueueNotFound;
+    if (!app.containsQueue(queue_name)) return errors.Queue.QueueNotFound;
     try app.add(queue_name, content);
 }
 
 fn getMessage(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const queue_name = req.params.get("queue_name") orelse return error.MissingQueueName;
-    if (!app.containsQueue(queue_name)) return error.QueueNotFound;
+    const queue_name = req.params.get("queue_name") orelse return errors.Queue.MissingQueueName;
+    if (!app.containsQueue(queue_name)) return errors.Queue.QueueNotFound;
     res.body = try app.removeOrWait(res.arena, queue_name);
 }
 
 fn deleteQueue(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
-    const queue_name = req.params.get("queue_name") orelse return error.MissingQueueName;
+    const queue_name = req.params.get("queue_name") orelse return errors.Queue.MissingQueueName;
     try app.deleteQueue(queue_name);
 }

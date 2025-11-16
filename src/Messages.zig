@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const errors = @import("errors.zig");
 const Message = @import("Message.zig");
 
 const Queue = @import("queue.zig").Queue(*Message, 100);
@@ -15,7 +16,7 @@ pub fn createQueue(self: *Self, allocator: std.mem.Allocator, queue_name: []cons
     self.mutex.lock();
     defer self.mutex.unlock();
     if (self.queues.contains(queue_name)) {
-        return error.QueueAlreadyExists;
+        return errors.Queue.QueueAlreadyExists;
     }
     const k = try allocator.dupe(u8, queue_name);
     const q = try allocator.create(Queue);
@@ -45,7 +46,7 @@ pub fn removeOrWait(self: *Self, queue_name: []const u8) !*Message {
     if (self.queues.get(queue_name)) |queue| {
         return queue.removeOrWait();
     } else {
-        return error.QueueNotFound;
+        return errors.Queue.QueueNotFound;
     }
 }
 
@@ -56,8 +57,9 @@ pub fn deleteQueue(self: *Self, allocator: std.mem.Allocator, queue_name: []cons
         while (queue.removeOrNull()) |item| {
             allocator.free(&item.content);
         }
-        if (!self.queues.swapRemove(queue_name)) return error.QueueNotFound;
-    } else {
-        return error.QueueNotFound;
+        if (self.queues.swapRemove(queue_name)) {
+            return;
+        }
     }
+    return errors.Queue.QueueNotFound;
 }

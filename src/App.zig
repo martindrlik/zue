@@ -1,6 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const errors = @import("errors.zig");
+const httpz = @import("httpz");
+
 const Message = @import("Message.zig");
 const Messages = @import("Messages.zig");
 
@@ -40,4 +43,26 @@ pub fn removeOrWait(self: *Self, allocator: std.mem.Allocator, queue_name: []con
 
 pub fn deleteQueue(self: *Self, queue_name: []const u8) !void {
     try self.messages.deleteQueue(self.allocator, queue_name);
+}
+
+pub fn uncaughtError(_: *Self, req: *httpz.Request, res: *httpz.Response, err: anyerror) void {
+    switch (err) {
+        errors.Queue.MissingQueueName => {
+            res.status = 400;
+            res.body = "missing queue name";
+        },
+        errors.Queue.QueueAlreadyExists => {
+            res.status = 400;
+            res.body = "queue already exists";
+        },
+        errors.Queue.QueueNotFound => {
+            res.status = 400;
+            res.body = "queue not found";
+        },
+        else => {
+            res.status = 500;
+            res.body = "something went wrong";
+        },
+    }
+    std.log.info("{} {} {s} {}", .{ res.status, req.method, req.url.path, err });
 }
