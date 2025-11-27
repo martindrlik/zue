@@ -26,12 +26,11 @@ pub fn Queue(comptime T: type, capacity: usize) type {
 
         pub fn removeOrWait(self: *Self) T {
             self.mutex.lock();
+            defer self.mutex.unlock();
             while (self.size == 0) {
                 self.cond.wait(&self.mutex);
             }
-            const item = self.remove();
-            self.mutex.unlock();
-            return item;
+            return self.remove();
         }
 
         pub fn removeOrNull(self: *Self) ?T {

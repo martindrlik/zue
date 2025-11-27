@@ -31,6 +31,7 @@ pub fn add(self: *Self, queue_name: []const u8, content: []const u8) !void {
     std.mem.copyForwards(u8, &message.content, content);
     message.content_len = content.len;
     try self.messages.add(self.allocator, queue_name, message);
+    try saveMessage(queue_name, content);
 }
 
 pub fn removeOrWait(self: *Self, allocator: std.mem.Allocator, queue_name: []const u8) ![]const u8 {
@@ -38,6 +39,7 @@ pub fn removeOrWait(self: *Self, allocator: std.mem.Allocator, queue_name: []con
     defer self.allocator.destroy(message);
     var content = try allocator.alloc(u8, message.content_len);
     @memcpy(content[0..message.content_len], message.content[0..message.content_len]);
+    try dropMessage(queue_name);
     return content;
 }
 
@@ -65,4 +67,35 @@ pub fn uncaughtError(_: *Self, req: *httpz.Request, res: *httpz.Response, err: a
         },
     }
     std.log.info("{} {} {s} {}", .{ res.status, req.method, req.url.path, err });
+}
+
+fn saveMessage(queue_name: []const u8, content: []const u8) !void {
+    const file = try std.fs.cwd().createFile(queue_name, .{
+        .truncate = false,
+        .lock = .exclusive,
+    });
+    defer file.close();
+    try file.seekFromEnd(0);
+    var buf: [1024]u8 = undefined;
+    var writer = file.writerStreaming(&buf);
+
+    try writer.interface.writeInt(usize, content.len, .little);
+    try writer.interface.writeAll(content[0..content.len]);
+    try writer.interface.writeInt(usize, content.len, .little);
+
+    try writer.interface.flush();
+}
+
+fn dropMessage(queue_name: []const u8) !void {
+    const file = try std.fs.cwd().createFile(queue_name, .{
+        .truncate = false,
+        .lock = .exclusive,
+        .read = true,
+    });
+    defer file.close();
+    try file.seekFromEnd(-@sizeOf(usize));
+    var buf: [1024]u8 = undefined;
+    var reader = file.readerStreaming(&buf);
+    const content_len = try reader.interface.takeInt(usize, .little);
+    try file.setEndPos(try file.getEndPos() - (2 * @sizeOf(usize) + content_len));
 }
