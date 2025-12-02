@@ -10,7 +10,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var app = App.init(allocator);
+    var app = try App.init(allocator);
 
     var server = try httpz.Server(*App).init(allocator, .{ .port = 5882 }, &app);
     defer {
