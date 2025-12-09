@@ -10,9 +10,15 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var app = try App.init(allocator);
+    var args_it = try std.process.argsWithAllocator(allocator);
+    defer args_it.deinit();
+    while (args_it.next()) |arg| {
+        std.debug.print("{s}\n", .{arg});
+    }
 
-    var server = try httpz.Server(*App).init(allocator, .{ .port = 5882 }, &app);
+    var app = try App.init(allocator, .{ .use_file = true });
+
+    var server = try httpz.Server(*App).init(allocator, .{ .port = 5883 }, &app);
     defer {
         server.stop();
         server.deinit();
@@ -35,14 +41,14 @@ fn createQueue(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
 fn putMessage(app: *App, req: *httpz.Request, _: *httpz.Response) !void {
     const queue_name = req.params.get("queue_name") orelse return errors.Queue.MissingQueueName;
     const content = req.body() orelse return error.MissingContent;
-    if (!app.containsQueue(queue_name)) return errors.Queue.QueueNotFound;
-    try app.add(queue_name, content);
+    if (!try app.containsQueue(queue_name)) return errors.Queue.QueueNotFound;
+    try app.enqueueMessage(queue_name, content);
 }
 
 fn getMessage(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const queue_name = req.params.get("queue_name") orelse return errors.Queue.MissingQueueName;
-    if (!app.containsQueue(queue_name)) return errors.Queue.QueueNotFound;
-    res.body = try app.removeOrWait(res.arena, queue_name);
+    if (!try app.containsQueue(queue_name)) return errors.Queue.QueueNotFound;
+    res.body = try app.popMessageOrWait(res.arena, queue_name);
 }
 
 fn deleteQueue(app: *App, req: *httpz.Request, _: *httpz.Response) !void {

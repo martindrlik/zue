@@ -1,52 +1,65 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const errors = @import("errors.zig");
 const httpz = @import("httpz");
 
+const errors = @import("errors.zig");
 const Message = @import("Message.zig");
 const Messages = @import("Messages.zig");
 
-allocator: std.mem.Allocator,
-messages: Messages = .{},
-
 const Self = @This();
 
-pub fn init(allocator: std.mem.Allocator) !Self {
-    var self = Self{
+allocator: std.mem.Allocator,
+messages: Messages = .{},
+config: Config,
+
+pub const Config = struct {
+    use_file: bool,
+};
+
+pub fn init(allocator: std.mem.Allocator, comptime config: Config) !Self {
+    return .{
         .allocator = allocator,
+        .config = config,
     };
-    try self.loadQueues();
-    return self;
 }
 
 pub fn createQueue(self: *Self, queue_name: []const u8) !void {
-    try self.messages.createQueue(self.allocator, queue_name);
+    try if (!self.config.use_file) self.messages.createQueue(self.allocator, queue_name);
 }
 
-pub fn containsQueue(self: *Self, queue_name: []const u8) bool {
-    return self.messages.queues.contains(queue_name);
+pub fn containsQueue(self: *Self, queue_name: []const u8) !bool {
+    if (self.config.use_file) {
+        return try fileExists(queue_name);
+    } else {
+        return self.messages.queues.contains(queue_name);
+    }
 }
 
-pub fn add(self: *Self, queue_name: []const u8, content: []const u8) !void {
-    try self.addInternal(queue_name, content);
-    try saveMessage(queue_name, content);
+fn fileExists(queue_name: []const u8) !bool {
+    var dir = try queueDir();
+    defer dir.close();
+    _ = dir.statFile(queue_name) catch |err| switch (err) {
+        std.fs.File.OpenError.FileNotFound => return false,
+        else => return err,
+    };
+    return true;
 }
 
-fn addInternal(self: *Self, queue_name: []const u8, content: []const u8) !void {
-    var message = try self.allocator.create(Message);
-    std.mem.copyForwards(u8, &message.content, content);
-    message.content_len = content.len;
-    try self.messages.add(self.allocator, queue_name, message);
+pub fn enqueueMessage(self: *Self, queue_name: []const u8, content: []const u8) !void {
+    if (self.config.use_file) {
+        try fileEnqueue(queue_name, content);
+    } else {
+        try self.memEnqueue(queue_name, content);
+    }
 }
 
-pub fn removeOrWait(self: *Self, allocator: std.mem.Allocator, queue_name: []const u8) ![]const u8 {
-    const message = try self.messages.removeOrWait(queue_name);
-    defer self.allocator.destroy(message);
-    var content = try allocator.alloc(u8, message.content_len);
-    @memcpy(content[0..message.content_len], message.content[0..message.content_len]);
-    try dropMessage(queue_name);
-    return content;
+pub fn popMessageOrWait(self: *Self, allocator: std.mem.Allocator, queue_name: []const u8) ![]const u8 {
+    if (self.config.use_file) {
+        return try filePopNoWaitImplemented(allocator, queue_name);
+    } else {
+        return try self.memPopMessageOrWait(allocator, queue_name);
+    }
 }
 
 pub fn deleteQueue(self: *Self, queue_name: []const u8) !void {
@@ -75,7 +88,14 @@ pub fn uncaughtError(_: *Self, req: *httpz.Request, res: *httpz.Response, err: a
     std.log.info("{} {} {s} {}", .{ res.status, req.method, req.url.path, err });
 }
 
-fn saveMessage(queue_name: []const u8, content: []const u8) !void {
+fn memEnqueue(self: *Self, queue_name: []const u8, content: []const u8) !void {
+    var message = try self.allocator.create(Message);
+    std.mem.copyForwards(u8, &message.content, content);
+    message.content_len = content.len;
+    try self.messages.add(self.allocator, queue_name, message);
+}
+
+fn fileEnqueue(queue_name: []const u8, content: []const u8) !void {
     var dir = try queueDir();
     defer dir.close();
     const file = try dir.createFile(queue_name, .{
@@ -94,7 +114,15 @@ fn saveMessage(queue_name: []const u8, content: []const u8) !void {
     try writer.interface.flush();
 }
 
-fn dropMessage(queue_name: []const u8) !void {
+fn memPopMessageOrWait(self: *Self, allocator: std.mem.Allocator, queue_name: []const u8) ![]const u8 {
+    const message = try self.messages.removeOrWait(queue_name);
+    defer self.allocator.destroy(message);
+    var content = try allocator.alloc(u8, message.content_len);
+    @memcpy(content[0..message.content_len], message.content[0..message.content_len]);
+    return content;
+}
+
+fn filePopNoWaitImplemented(allocator: std.mem.Allocator, queue_name: []const u8) ![]const u8 {
     var dir = try queueDir();
     defer dir.close();
     const file = try dir.createFile(queue_name, .{
@@ -107,39 +135,12 @@ fn dropMessage(queue_name: []const u8) !void {
     var buf: [1024]u8 = undefined;
     var reader = file.readerStreaming(&buf);
     const content_len = try reader.interface.takeInt(usize, .little);
+    try file.seekFromEnd(-@as(i64, @intCast(content_len)) - @sizeOf(usize));
+    var content = try allocator.alloc(u8, content_len);
+    const buf_content = try reader.interface.take(content_len);
+    @memcpy(content[0..content_len], buf_content);
     try file.setEndPos(try file.getEndPos() - (2 * @sizeOf(usize) + content_len));
-}
-
-fn loadMessage(self: *Self, queue_name: []const u8, reader: *std.fs.File.Reader) !void {
-    const content_len = try reader.interface.takeInt(usize, .little);
-    const content = try reader.interface.take(content_len);
-    std.debug.assert(content_len == try reader.interface.takeInt(usize, .little));
-    try self.addInternal(queue_name, content);
-}
-
-fn loadMessages(self: *Self, queue_name: []const u8, reader: *std.fs.File.Reader) !void {
-    while (true) {
-        self.loadMessage(queue_name, reader) catch |err| switch (err) {
-            std.Io.Reader.Error.EndOfStream => break,
-            else => return err,
-        };
-    }
-}
-
-fn loadQueues(self: *Self) !void {
-    var dir = try queueDir();
-    defer dir.close();
-    var it = dir.iterate();
-    while (try it.next()) |entry| {
-        try self.createQueue(entry.name);
-        const file = try dir.openFile(entry.name, .{});
-        defer file.close();
-        var buf: [1024]u8 = undefined;
-        var reader = file.reader(&buf);
-        try self.loadMessages(entry.name, &reader);
-        const queue = self.messages.queues.get(entry.name) orelse unreachable;
-        std.debug.print("queue '{s}' loaded with {d} message(s)\n", .{ entry.name, queue.size });
-    }
+    return content;
 }
 
 fn queueDir() !std.fs.Dir {
