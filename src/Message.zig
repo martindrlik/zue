@@ -1,2 +1,2 @@
-content_len: usize,
-content: [1000]u8,
+data_len: usize,
+data: [1000]u8,
